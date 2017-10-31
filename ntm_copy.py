@@ -1,14 +1,8 @@
 '''
 Modelo: Máquina de Turing Neuronal
-Tarea: Recuerdo asociativo.
+Tarea: Copia de secuencias
 https://github.com/OmarGutierrez/NTM
 
-Se entrena a la MTN para recibir una secuencia N vectores de N+1 bits y
-dos vectores adicionales, el vector N+1 contiene una bandera en el bit N+1
-y un 1 en alguno de los N bits restantes (las demás localidades son 0) que 
-indica el vector que se desea recuperar. Si el 1 esá en la posición 2,
-entonces se desea recuperar el segundo vector. El vector N+1 es únicamente
-de ceros.
 
 Basada en el artículo: https://arxiv.org/abs/1410.5401
 '''
@@ -51,13 +45,14 @@ sess = tf.InteractiveSession()
 _BIAS_VARIABLE_NAME = "bias"
 _WEIGHTS_VARIABLE_NAME = "kernel"
 
-
 # Combinación lineal entre capas
 # Fuente: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
 def _linear(args,
             output_size,
             bias,
+            #bias_initializer=None,
             bias_initializer=None,
+            #kernel_initializer=None,
             kernel_initializer=tf.random_uniform_initializer(-0.5, 0.5)):
   """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
   Args:
@@ -116,8 +111,8 @@ def _linear(args,
     return nn_ops.bias_add(res, biases)
 
 
-# Convertir la colección de estados en una tupla
-# Fuente: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
+#Convertir la colección de estados en una tupla
+#Fuente: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
 _StateToTuple = collections.namedtuple("StateToTuple", ("h","M","r","ww","wr"))
 class StateToTuple(_StateToTuple):
     """Tuple used by LSTM Cells for `state_size`, `zero_state`, and output state.
@@ -373,7 +368,7 @@ class NTMCell(tf.nn.rnn_cell.RNNCell):
 
         ################################################################
         ################################################################
-                            #operación de escritura
+                             #operación de escritura
         ################################################################
         ################################################################
         def write(M,a,e,new_w):
@@ -391,13 +386,14 @@ class NTMCell(tf.nn.rnn_cell.RNNCell):
 
         ################################################################
         ################################################################
-                                #operación de lectura
+                            #operación de lectura
         ################################################################
         ################################################################
         def read(new_M,new_w):
             new_r = tf.reduce_sum(tf.multiply(tf.transpose(new_w),new_M),0) #vector fila de tamaño M
 
             return new_r
+
 
 
         #Obteniendo los nuevos ww y wr
@@ -430,48 +426,33 @@ class NTMCell(tf.nn.rnn_cell.RNNCell):
        
 
 
+
+
 ################################################################
 ################################################################
-        #Generador de instancias (Recuerdo asociativo)
+        #Generador de instancias (Copia de secuencias)
 ################################################################
 ################################################################
 def next_batch(batch_size, length, bits):
     '''
-    Generador de instancias para la tarea de recuerdo asociativo
+    Generador de instancias para la tarea de copia de secuencias
     batch_size: [int] Número de secuencias en el batch.
     lenght: [int] Número de vectores en cada secuencia.
     bits: [int] Número de bits en cada vector
     '''
-    X_sec = np.zeros([batch_size,length,bits])
-    X_sec[:,:,0:bits] = np.random.rand(batch_size,length,bits).round()
-    X_ntm = np.zeros([batch_size,length+2,bits+1])
-    X_ntm[:,length,-1] = 1
-    wanted = np.random.random_integers(0, high=length-1, size=batch_size)
-    X_ntm[:,length,wanted] = 1
+	X_sec = np.zeros([batch_size,length,bits])
+	X_sec[:,:,0:bits] = np.random.rand(batch_size,length,bits).round()
+	X_ntm = np.zeros([batch_size,length*2+1,bits+1])
+	X_ntm[:,length,-1] = 1
+	X_ntm[:,0:length,0:bits] = X_sec[:,:,:]
 
-    X_ntm[:,0:length,0:bits] = X_sec[:,:,:]
+	Y_ntm = np.zeros([batch_size,length*2+1,bits])
+	Y_ntm[:,length+1:,:] = X_sec[:,:,:]
+	
+	return X_ntm, Y_ntm
 
-    Y_ntm = np.zeros([batch_size,length+2,bits])
-    Y_ntm[:,-1,:] = X_sec[:,wanted,:]
 
-    return X_ntm, Y_ntm
 
-#Generador de instancias para realizar el test post entrenamiento
-def next_batch_test(batch_size, length, bits, solicitud):
-    X_sec = np.zeros([batch_size,length,bits])
-    X_sec[:,:,0:bits] = np.random.rand(batch_size,length,bits).round()
-    X_ntm = np.zeros([batch_size,length+2,bits+1])
-    X_ntm[:,length,-1] = 1
-    #wanted = np.random.random_integers(0, high=length-1, size=batch_size)
-    wanted = solicitud
-    X_ntm[:,length,wanted] = 1
-
-    X_ntm[:,0:length,0:bits] = X_sec[:,:,:]
-
-    Y_ntm = np.zeros([batch_size,length+2,bits])
-    Y_ntm[:,-1,:] = X_sec[:,wanted,:]
-
-    return X_ntm, Y_ntm
 
 
 
@@ -490,7 +471,7 @@ CON BATCH DE TAMAÑO 1), EL TAMAÑO DE LA MEMORIA, ETC.
         #Configuración del modelo
 ###########################################
 #Longitud de la secuencia.
-length = 5
+length = 3
 #Tamaño de cada vector.
 bits = 5
 #Número de neuronas en el controlador.
@@ -499,7 +480,6 @@ control_size = 100
 memory_num_loc=50
 #Tamaño de cada localidad.
 memory_size_loc=20
-
 
 ###########################################
     #Configuración del entrenamiento
@@ -516,6 +496,7 @@ decay=0.9
 momentum=0.9
 #Valor de épsilon usado durante el entrenamiento.
 epsilon=1e-10
+
 
 
 ###########################################
@@ -537,13 +518,15 @@ def errores(target,prediction):
 num_errores = errores(tar,pred)
 
 
+
 ###########################################
-    #Placeholders para recuerdo asociativo
+    #Placeholders para copia de secuencias
 ###########################################
 #Placeholders que reciben las entradas X y etiquetas Y del
 # batch a entrenar.
-X = tf.placeholder(tf.float32, [None, length+2, bits+1])
-y = tf.placeholder(tf.float32, [None, length+2, bits])
+X = tf.placeholder(tf.float32, [None, length*2+1, bits+1])
+y = tf.placeholder(tf.float32, [None, length*2+1, bits])
+
 
 
 ###########################################
@@ -553,7 +536,7 @@ y = tf.placeholder(tf.float32, [None, length+2, bits])
 Se establece como -cell- una NTMCell y se envuelve en un
 OutputprojectionWrapper para que en cada paso de tiempo
 se genere una salida de tamaño -bits- y con función de
-activación simoidal (usada en sigmoid_cross_entropy_with_logits).
+activación sigmoidal.
 '''
 cell = tf.contrib.rnn.OutputProjectionWrapper(
     NTMCell(
@@ -567,8 +550,8 @@ cell = tf.contrib.rnn.OutputProjectionWrapper(
         memory_size_loc=memory_size_loc),
 
         #La salida del Wrapper en cada paso de tiempo es de
-        # tamaño -bits- y con activación simoidal (usada en sigmoid_cross_entropy_with_logits).
-        output_size=bits, activation= None) 
+        # tamaño -bits- y con activación sigmoidal.
+        output_size=bits, activation= tf.sigmoid ) 
 
 
 ###########################################
@@ -591,6 +574,7 @@ Se usa StateToTuple() para transformar los estados
 en una sola tupla de estado que pueda ser aceptada por
 tf.nn.dynamic_rnn().
 '''
+
 state_init_batch = StateToTuple(
     #h: inicialización con ceros.
     tf.zeros([1, control_size]),
@@ -613,9 +597,9 @@ outputs, states = tf.nn.dynamic_rnn(cell, X, dtype=tf.float32,initial_state=stat
 ###########################################
         #Funciones de entrenamiento
 ###########################################
-#Función de costo: Entropía cruzada
-#loss = tf.reduce_mean(tf.square(outputs - y)) # MSE
-loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=outputs, labels=y), name="loss")
+#Función de costo: Error cuadrático medio
+loss = tf.reduce_mean(tf.square(outputs - y)) # MSE
+#loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=outputs, labels=y), name="loss")
 
 #Algoritmo de entrenamiento: RMSProp
 optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate,decay=decay,momentum=momentum)
@@ -624,20 +608,16 @@ optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate,decay=decay,mo
 #Minimizar la función -loss- usando RMSProp
 training_op = optimizer.minimize(loss)
 
-#Predicción en test
-prediccion_test = tf.round(tf.sigmoid(outputs))
-
-
 
 ###########################################
     #Inicialización de variables
 ###########################################
-#Inicializador globlar de variables
+# Inicializador globlar de variables
 init = tf.global_variables_initializer()
+
 
 # Add ops to save and restore all the variables.
 #saver = tf.train.Saver()
-
 
 '''
 #Restore variables from disk.
@@ -679,6 +659,7 @@ en el modelo (pesos y sesgos).
 #print(total_parameters)
 
 
+
 ###########################################
                 #Entrenamiento
 ###########################################
@@ -695,9 +676,9 @@ for epoch in range(Epochs):
     #Corre el entrenamiento de la MTN para el batch generado.
     sess.run(training_op, feed_dict={X: X_batch, y: y_batch})
     if epoch % 500 == 0:
-        #Imprime el error (Entropía cruzada)
+        #Imprime el error (MSE)
         mse = loss.eval(feed_dict={X: X_batch, y: y_batch})
-        print(epoch, "\tCE:", mse)
+        print(epoch, "\tMSE:", mse)
 
 
 # Save the variables to disk.
@@ -705,23 +686,57 @@ for epoch in range(Epochs):
 #print("Model saved in file: %s" % save_path)
 
 
+
 ###########################################
                    #Test
 ###########################################
 '''
-Sección de codigo que genera una instanta de la tarea de
-recuerdo asociativo y usa al modelo previamente entrenado
-para obtener una predicción. Repite el procedimiento con
-un vector solicitud diferente en cada ejecución.
+Sección de codigo que genera una instanta de la tarea de copiar
+secuancias y usa al modelo previamente entrenado para obtener
+una predicción.
 '''
 print("\nTest: ")
-for i in range(length):
-    X_test, Y_test = next_batch_test(1, length, bits, i)
-    copia = sess.run(prediccion_test, feed_dict={X: X_test, y: Y_test})
+#Genera una secuencia de tamaño -lenght- y vectores de tamaño -bits-.
+X_test, Y_test = next_batch(1, length, bits)
+#Ejecuta -tf.nn.dynamic_rnn- para obtener -output- (predicción)
+#   y guarda la salida en -copia-.  
+copia = sess.run(outputs, feed_dict={X: X_test, y: Y_test})
+#Se almacena en -input- y -target- la entranda X_test  y el taget Y_test
+#   eliminando los vectores de ceros adicionales.
+input = X_test[:,:length,:-1]
+target = Y_test[:,-length:,:]
+#Se rendondea la prediccion -copia- y se eliminan los vectores de ceros adicionales.
+prediction = np.around(copia[:,-length:,:])
+#Se calcula el número de discrepancias bit a bit entre la prediccion y el target
+num_errores = sess.run(num_errores, feed_dict={tar: target, pred: prediction})
 
-    print("\nX: ")
-    print(X_test)
-    print("\nVector solicitado (NTM): ")
-    print(copia)
-    print("\nVector solicitado (Target): ")
-    print(Y_test)
+
+
+print("\nX: ")
+print(X_test)
+
+print("\nCopia (NTM): ")
+print(np.around(copia))
+
+print("\nCopia (Target): ")
+print(Y_test)
+
+print("\nNúmero de errores: ")
+print(num_errores)
+
+
+
+print("\nX: ")
+print(input)
+
+print("\nCopia NTM: ")
+print(prediction)
+
+print("\nCopia Target: ")
+print(target)
+
+print("\nNúmero de errores: ")
+print(num_errores)
+
+
+
